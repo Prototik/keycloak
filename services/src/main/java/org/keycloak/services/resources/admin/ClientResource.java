@@ -77,8 +77,6 @@ import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Stream;
@@ -298,21 +296,14 @@ public class ClientResource {
     @NoCache
     @Produces(MediaType.APPLICATION_JSON)
     @Path("default-client-scopes")
-    public List<ClientScopeRepresentation> getDefaultClientScopes() {
+    public Stream<ClientScopeRepresentation> getDefaultClientScopes() {
         return getDefaultClientScopes(true);
     }
 
-    private List<ClientScopeRepresentation> getDefaultClientScopes(boolean defaultScope) {
+    private Stream<ClientScopeRepresentation> getDefaultClientScopes(boolean defaultScope) {
         auth.clients().requireView(client);
 
-        List<ClientScopeRepresentation> defaults = new LinkedList<>();
-        for (ClientScopeModel clientScope : client.getClientScopes(defaultScope, true).values()) {
-            ClientScopeRepresentation rep = new ClientScopeRepresentation();
-            rep.setId(clientScope.getId());
-            rep.setName(clientScope.getName());
-            defaults.add(rep);
-        }
-        return defaults;
+        return client.getClientScopes(defaultScope, true).values().stream().map(ClientResource::toRepresentation);
     }
 
 
@@ -332,7 +323,7 @@ public class ClientResource {
         }
         client.addClientScope(clientScope, defaultScope);
 
-        adminEvent.operation(OperationType.CREATE).resource(ResourceType.CLIENT).resourcePath(session.getContext().getUri()).success();
+        adminEvent.operation(OperationType.CREATE).resource(ResourceType.CLIENT_SCOPE_CLIENT_MAPPING).resourcePath(session.getContext().getUri()).success();
     }
 
 
@@ -348,7 +339,7 @@ public class ClientResource {
         }
         client.removeClientScope(clientScope);
 
-        adminEvent.operation(OperationType.DELETE).resource(ResourceType.CLIENT).resourcePath(session.getContext().getUri()).success();
+        adminEvent.operation(OperationType.DELETE).resource(ResourceType.CLIENT_SCOPE_CLIENT_MAPPING).resourcePath(session.getContext().getUri()).success();
     }
 
 
@@ -361,7 +352,7 @@ public class ClientResource {
     @NoCache
     @Produces(MediaType.APPLICATION_JSON)
     @Path("optional-client-scopes")
-    public List<ClientScopeRepresentation> getOptionalClientScopes() {
+    public Stream<ClientScopeRepresentation> getOptionalClientScopes() {
         return getDefaultClientScopes(false);
     }
 
@@ -534,9 +525,9 @@ public class ClientResource {
         if (node == null) {
             throw new BadRequestException("Node not found in params");
         }
-        
+
         ReservedCharValidator.validate(node);
-        
+
         if (logger.isDebugEnabled()) logger.debug("Register node: " + node);
         client.registerNode(node, Time.currentTime());
         adminEvent.operation(OperationType.CREATE).resource(ResourceType.CLUSTER_NODE).resourcePath(session.getContext().getUri(), node).success();
@@ -697,6 +688,13 @@ public class ClientResource {
         if (result != null) {
             rep.setLastAccess(Time.toMillis(result.getValue().getTimestamp()));
         }
+        return rep;
+    }
+
+    private static ClientScopeRepresentation toRepresentation(ClientScopeModel clientScopeModel) {
+        ClientScopeRepresentation rep = new ClientScopeRepresentation();
+        rep.setId(clientScopeModel.getId());
+        rep.setName(clientScopeModel.getName());
         return rep;
     }
 }

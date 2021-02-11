@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.keycloak.models.map.storage;
+package org.keycloak.models.map.storage.chm;
 
 import org.keycloak.Config.Scope;
 import org.keycloak.models.KeycloakSession;
@@ -28,8 +28,9 @@ import java.nio.file.Files;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.logging.Level;
 import org.jboss.logging.Logger;
+import org.keycloak.models.map.storage.MapStorageProvider;
+import org.keycloak.models.map.storage.ModelCriteriaBuilder;
 
 /**
  *
@@ -37,14 +38,11 @@ import org.jboss.logging.Logger;
  */
 public class ConcurrentHashMapStorageProvider implements MapStorageProvider {
 
-    private static class ConcurrentHashMapStorage<K, V> extends ConcurrentHashMap<K, V> implements MapStorage<K, V> {
-    }
-
-    private static final String PROVIDER_ID = "concurrenthashmap";
+    public static final String PROVIDER_ID = "concurrenthashmap";
 
     private static final Logger LOG = Logger.getLogger(ConcurrentHashMapStorageProvider.class);
 
-    private final ConcurrentHashMap<String, ConcurrentHashMap<?,?>> storages = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, ConcurrentHashMapStorage<?,?,?>> storages = new ConcurrentHashMap<>();
 
     private File storageDirectory;
 
@@ -74,13 +72,15 @@ public class ConcurrentHashMapStorageProvider implements MapStorageProvider {
         storages.forEach(this::storeMap);
     }
 
-    private void storeMap(String fileName, ConcurrentHashMap<?, ?> store) {
+    private void storeMap(String fileName, ConcurrentHashMapStorage<?, ?, ?> store) {
         if (fileName != null) {
             File f = getFile(fileName);
             try {
                 if (storageDirectory != null && storageDirectory.exists()) {
                     LOG.debugf("Storing contents to %s", f.getCanonicalPath());
-                    Serialization.MAPPER.writeValue(f, store.values());
+                    @SuppressWarnings("unchecked")
+                    final ModelCriteriaBuilder readAllCriteria = store.createCriteriaBuilder();
+                    Serialization.MAPPER.writeValue(f, store.read(readAllCriteria));
                 } else {
                     LOG.debugf("Not storing contents of %s because directory %s does not exist", fileName, this.storageDirectory);
                 }
@@ -90,8 +90,9 @@ public class ConcurrentHashMapStorageProvider implements MapStorageProvider {
         }
     }
 
-    private <K, V extends AbstractEntity<K>> ConcurrentHashMapStorage<?, V> loadMap(String fileName, Class<V> valueType, EnumSet<Flag> flags) {
-        ConcurrentHashMapStorage<K, V> store = new ConcurrentHashMapStorage<>();
+    private <K, V extends AbstractEntity<K>, M> ConcurrentHashMapStorage<K, V, M> loadMap(String fileName,
+      Class<V> valueType, Class<M> modelType, EnumSet<Flag> flags) {
+        ConcurrentHashMapStorage<K, V, M> store = new ConcurrentHashMapStorage<>(modelType);
 
         if (! flags.contains(Flag.INITIALIZE_EMPTY)) {
             final File f = getFile(fileName);
@@ -101,7 +102,7 @@ public class ConcurrentHashMapStorageProvider implements MapStorageProvider {
                     JavaType type = Serialization.MAPPER.getTypeFactory().constructCollectionType(List.class, valueType);
 
                     List<V> values = Serialization.MAPPER.readValue(f, type);
-                    values.forEach((V mce) -> store.put(mce.getId(), mce));
+                    values.forEach((V mce) -> store.create(mce.getId(), mce));
                 } catch (IOException ex) {
                     throw new RuntimeException(ex);
                 }
@@ -118,9 +119,10 @@ public class ConcurrentHashMapStorageProvider implements MapStorageProvider {
 
     @Override
     @SuppressWarnings("unchecked")
-    public <K, V extends AbstractEntity<K>> MapStorage<K, V> getStorage(String name, Class<K> keyType, Class<V> valueType, Flag... flags) {
+    public <K, V extends AbstractEntity<K>, M> ConcurrentHashMapStorage<K, V, M> getStorage(String name,
+      Class<K> keyType, Class<V> valueType, Class<M> modelType, Flag... flags) {
         EnumSet<Flag> f = flags == null || flags.length == 0 ? EnumSet.noneOf(Flag.class) : EnumSet.of(flags[0], flags);
-        return (MapStorage<K, V>) storages.computeIfAbsent(name, n -> loadMap(name, valueType, f));
+        return (ConcurrentHashMapStorage<K, V, M>) storages.computeIfAbsent(name, n -> loadMap(name, valueType, modelType, f));
     }
 
     private File getFile(String fileName) {
